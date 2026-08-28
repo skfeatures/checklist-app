@@ -259,6 +259,8 @@
                     lastSyncedVersion = 0;
                     localStorage.removeItem('checklist_backup'); 
                     
+                    // Reset history state to home on logout
+                    history.replaceState({ level: 'home', groupId: null, listId: null }, "");
                     render();
                 }
             });
@@ -370,7 +372,7 @@
         });
 
         // ==========================================
-        // 2. STATE & DATA MANAGEMENT
+        // 2. STATE, HISTORY & DATA MANAGEMENT
         // ==========================================
         let tempCreationType = 'list';
         let tempColor = 'bg-[#1e2337]';
@@ -380,6 +382,28 @@
         
         let isSelectionMode = false;
         let selectedTaskIds = new Set();
+
+        // Push initial history state so the phone knows where 'home' is
+        window.history.replaceState({ level: 'home', groupId: null, listId: null }, "");
+
+        // Listen for Native System Back (Edge Swipe or Physical Back Button)
+        window.addEventListener('popstate', (event) => {
+            closeContinuousInput();
+            isSelectionMode = false;
+            selectedTaskIds.clear();
+
+            if (event.state) {
+                appState.currentLevel = event.state.level;
+                appState.activeGroupId = event.state.groupId;
+                appState.activeListId = event.state.listId;
+            } else {
+                appState.currentLevel = 'home';
+                appState.activeGroupId = null;
+                appState.activeListId = null;
+            }
+            render();
+        });
+
 
         // ==========================================
         // 3. UI RENDERING & NAVIGATION
@@ -406,7 +430,8 @@
             } 
             else if (appState.currentLevel === 'group') {
                 backBtn.classList.remove('hidden');
-                backBtn.onclick = () => navigate('home');
+                // Use history.back() for UI back button instead of manual logic
+                backBtn.onclick = () => { history.back(); };
                 outerFabs.classList.remove('hidden');
                 innerFab.classList.add('hidden');
                 contInputBar.classList.add('hidden');
@@ -418,7 +443,8 @@
             } 
             else if (appState.currentLevel === 'list') {
                 backBtn.classList.remove('hidden');
-                backBtn.onclick = () => navigate(appState.activeGroupId ? 'group' : 'home');
+                // Use history.back() for UI back button instead of manual logic
+                backBtn.onclick = () => { history.back(); };
                 outerFabs.classList.add('hidden');
                 innerFab.classList.remove('hidden'); 
                 
@@ -427,14 +453,16 @@
             }
         }
 
-        function navigate(level) {
-            closeContinuousInput();
-            appState.currentLevel = level;
-            isSelectionMode = false;
-            selectedTaskIds.clear();
-            
-            if(level === 'home') { appState.activeGroupId = null; appState.activeListId = null; }
-            if(level === 'group') { appState.activeListId = null; }
+        function openItem(id, type) {
+            if (type === 'group') {
+                appState.activeGroupId = id;
+                appState.currentLevel = 'group';
+            } else {
+                appState.activeListId = id;
+                appState.currentLevel = 'list';
+            }
+            // Push the new screen to the browser's history
+            history.pushState({ level: appState.currentLevel, groupId: appState.activeGroupId, listId: appState.activeListId }, "");
             render();
         }
 
@@ -508,17 +536,6 @@
             }
             markDataChanged();
             autoSaveToLocalStorage(true);
-            render();
-        }
-
-        function openItem(id, type) {
-            if (type === 'group') {
-                appState.activeGroupId = id;
-                appState.currentLevel = 'group';
-            } else {
-                appState.activeListId = id;
-                appState.currentLevel = 'list';
-            }
             render();
         }
 
@@ -619,7 +636,6 @@
             return el;
         }
 
-        // New function to handle task editing
         function editTask(taskId, event) {
             if (event) event.stopPropagation();
             let list = getActiveList();
@@ -895,32 +911,6 @@
                     searchInput.blur(); 
                 }
             });
-        }
-
-        // ==========================================
-        // MOBILE SWIPE-TO-GO-BACK LOGIC
-        // ==========================================
-        let touchStartX = 0;
-        let touchEndX = 0;
-
-        document.addEventListener('touchstart', e => {
-            touchStartX = e.changedTouches[0].screenX;
-        }, { passive: true });
-
-        document.addEventListener('touchend', e => {
-            touchEndX = e.changedTouches[0].screenX;
-            handleSwipe();
-        }, { passive: true });
-
-        function handleSwipe() {
-            // Check if it's a swipe from the left edge (within 50px) to the right (at least 75px distance)
-            if (touchStartX < 50 && (touchEndX - touchStartX > 75)) {
-                if (appState.currentLevel === 'list') {
-                    navigate(appState.activeGroupId ? 'group' : 'home');
-                } else if (appState.currentLevel === 'group') {
-                    navigate('home');
-                }
-            }
         }
 
         // Boot
