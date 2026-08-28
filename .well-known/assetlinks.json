@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.skfeatures.twa",
+        "sha256_cert_fingerprints": ["B5:A3:B5:C4:7F:62:D6:90:C4:BD:69:15:11:54:20:91:D7:F8:31:D5:36:31:FA:3B:52:7C:D8:FD:23:0E:C5:BA"]
+      }
+    }]
