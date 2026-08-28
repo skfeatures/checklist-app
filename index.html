@@ -189,29 +189,60 @@
         // 1. GOOGLE SYNC & FIREBASE SETUP
         // ==========================================
         const firebaseConfig = {
-            apiKey: "AIzaSyAiWtNo_usFAzdzBDYMMOM-kdAY0n7aYq0",
-            authDomain: "check-list-69ee5.firebaseapp.com",
-            projectId: "check-list-69ee5",
-            storageBucket: "check-list-69ee5.firebasestorage.app",
-            messagingSenderId: "244156844387",
-            appId: "1:244156844387:web:acf05e7332c02b09e72b56",
-            measurementId: "G-4ZLRLNR6WJ"
+            apiKey: "AIzaSyA_YWKuufeaYMfZPUeUBj-sdNuUR9-nNrM",
+            authDomain: "checklist-skfeatures.firebaseapp.com",
+            projectId: "checklist-skfeatures",
+            storageBucket: "checklist-skfeatures.firebasestorage.app",
+            messagingSenderId: "881617648035",
+            appId: "1:881617648035:web:19aeee8cdf0e2cbd7f4216",
+            measurementId: "G-XYFFQKM2M5"
         };
+
+        // Sync tracking variables
+        let localDataVersion = 0;
+        let lastSyncedVersion = 0;
+        let syncTimeout = null;
+        let isCloudSynced = false;
+        let unsubscribeSnapshot = null;
+        let currentUser = null;
+
+        // Initialize state with local backup
+        let rawBackup = JSON.parse(localStorage.getItem('checklist_backup')) || {};
+        let appState = {
+            currentLevel: 'home', 
+            activeGroupId: null,
+            activeListId: null,
+            isLoggedIn: false,
+            data: rawBackup.data || []
+        };
+        localDataVersion = rawBackup.localDataVersion || 0;
 
         let db, auth;
         if(firebaseConfig.apiKey !== "YOUR_API_KEY") {
             firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
             auth = firebase.auth();
+            db = firebase.firestore();
+            
+            // Enable offline persistence
+            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(console.warn);
+            db.enablePersistence({ synchronizeTabs: true }).catch(console.warn);
             
             auth.onAuthStateChanged(user => {
                 if (user) {
+                    currentUser = user;
                     appState.isLoggedIn = true;
+                    isCloudSynced = false;
                     document.getElementById('auth-text').innerText = "Log off";
-                    syncDataFromGoogle(user.uid);
+                    syncDataFromGoogle(user);
                 } else {
+                    currentUser = null;
                     appState.isLoggedIn = false;
                     document.getElementById('auth-text').innerText = "Login";
+                    if(unsubscribeSnapshot) {
+                        unsubscribeSnapshot();
+                        unsubscribeSnapshot = null;
+                    }
+                    render();
                 }
             });
         }
@@ -228,33 +259,102 @@
                 auth.signInWithPopup(provider);
             }
         }
-
-        function syncDataToGoogle() {
-            if (appState.isLoggedIn && db && auth.currentUser) {
-                db.collection('users').doc(auth.currentUser.uid).set({ data: appState.data });
-            }
+        
+        function markDataChanged() {
+            localDataVersion = Date.now();
         }
 
-        function syncDataFromGoogle(uid) {
-            db.collection('users').doc(uid).onSnapshot(doc => {
+        function autoSaveToLocalStorage(immediate = false) {
+            localStorage.setItem('checklist_backup', JSON.stringify({
+                data: appState.data,
+                localDataVersion: localDataVersion
+            }));
+            
+            if (typeof window.syncToCloud === 'function') window.syncToCloud(immediate);
+        }
+
+        window.syncToCloud = function(immediate = false) {
+            if (!currentUser || !isCloudSynced) return;
+            if (localDataVersion <= lastSyncedVersion) return;
+
+            const pushData = () => {
+                const dataToSave = {
+                    data: appState.data,
+                    localDataVersion: localDataVersion,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                db.collection('users').doc(currentUser.uid).set(dataToSave, {merge: true})
+                  .then(() => { lastSyncedVersion = localDataVersion; })
+                  .catch(err => {
+                      console.error("Cloud sync error", err);
+                      if (err.code === 'permission-denied') {
+                          alert("Unauthorized Account: You do not have permission to save data to this cloud.");
+                          auth.signOut();
+                      }
+                  });
+            };
+
+            clearTimeout(syncTimeout);
+            if (immediate) {
+                pushData();
+            } else {
+                syncTimeout = setTimeout(pushData, 1000); // Debounce
+            }
+        };
+
+        function syncDataFromGoogle(user) {
+            unsubscribeSnapshot = db.collection('users').doc(user.uid).onSnapshot({ includeMetadataChanges: true }, doc => {
                 if (doc.exists) {
-                    appState.data = doc.data().data;
-                    render();
+                    isCloudSynced = true;
+                    const cloudData = doc.data();
+                    const cloudVersion = cloudData.localDataVersion || 0;
+
+                    // Conflict Resolution: Last Write Wins based on timestamps
+                    if (cloudVersion > localDataVersion) {
+                        appState.data = cloudData.data || [];
+                        localDataVersion = cloudVersion;
+                        lastSyncedVersion = cloudVersion;
+                        
+                        autoSaveToLocalStorage();
+                        render();
+                    } else if (localDataVersion > cloudVersion) {
+                        window.syncToCloud(true);
+                    }
+                } else {
+                    if (!doc.metadata.fromCache) {
+                        isCloudSynced = true;
+                        window.syncToCloud(true);
+                    }
+                }
+            }, err => {
+                console.error("Firebase read blocked:", err);
+                if (err.code === 'permission-denied') {
+                    alert("Unauthorized Account: Your email is not allowed to access this database.");
+                    auth.signOut();
                 }
             });
         }
 
+        // Network and Visibility Listeners for safety
+        window.addEventListener('beforeunload', () => autoSaveToLocalStorage(true));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (navigator.onLine && currentUser) firebase.firestore().enableNetwork().catch(console.error);
+            } else if (document.visibilityState === 'hidden') {
+                autoSaveToLocalStorage(true);
+            }
+        });
+        window.addEventListener('online', () => {
+            if (currentUser) firebase.firestore().enableNetwork().catch(console.error);
+        });
+        window.addEventListener('offline', () => {
+            if (currentUser) firebase.firestore().disableNetwork().catch(console.error);
+        });
+
         // ==========================================
         // 2. STATE & DATA MANAGEMENT
         // ==========================================
-        let appState = {
-            currentLevel: 'home', 
-            activeGroupId: null,
-            activeListId: null,
-            isLoggedIn: false,
-            data: []
-        };
-
         let tempCreationType = 'list';
         let tempColor = 'bg-[#1e2337]';
         let tempIcon = 'fa-list-ul';
@@ -363,7 +463,16 @@
                 delay: 150, 
                 delayOnTouchOnly: true,
                 onEnd: function (evt) {
-                    syncDataToGoogle();
+                    // Reorder local array to match drag sorting if needed
+                    const orderIds = sortableInstance.toArray();
+                    if(appState.currentLevel === 'home') {
+                        appState.data.sort((a,b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
+                    } else if(appState.currentLevel === 'group') {
+                        let group = appState.data.find(g => g.id === appState.activeGroupId);
+                        group.items.sort((a,b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
+                    }
+                    markDataChanged();
+                    autoSaveToLocalStorage();
                 }
             });
         }
@@ -380,7 +489,8 @@
                     group.items = group.items.filter(i => i.id !== id);
                 }
             }
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage(true);
             render();
         }
 
@@ -494,7 +604,8 @@
             let task = list.items.find(t => t.id === taskId);
             task.starred = !task.starred;
             renderInnerTasks(list);
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage();
         }
 
         function toggleSelectionMode() {
@@ -521,7 +632,8 @@
             
             selectedTaskIds.clear();
             isSelectionMode = false;
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage(true);
             render();
         }
 
@@ -532,7 +644,8 @@
             
             selectedTaskIds.clear();
             isSelectionMode = false;
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage(true);
             render();
         }
 
@@ -562,7 +675,8 @@
             
             taskInput.value = '';
             renderInnerTasks(list);
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage();
 
             setTimeout(() => taskInput.focus(), 10);
         }
@@ -577,12 +691,14 @@
                 setTimeout(() => {
                     task.completed = true;
                     renderInnerTasks(list);
-                    syncDataToGoogle();
+                    markDataChanged();
+                    autoSaveToLocalStorage();
                 }, 400);
             } else {
                 task.completed = false;
                 renderInnerTasks(list);
-                syncDataToGoogle();
+                markDataChanged();
+                autoSaveToLocalStorage();
             }
         }
 
@@ -710,7 +826,8 @@
                 }
             }
 
-            syncDataToGoogle();
+            markDataChanged();
+            autoSaveToLocalStorage();
             closeModal();
             render();
         }
