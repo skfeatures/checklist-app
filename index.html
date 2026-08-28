@@ -587,6 +587,9 @@
                 </div>
                 ${!isSelectionMode ? `
                 <div class="flex items-center space-x-3 shrink-0">
+                    <button onclick="editTask('${task.id}', event)" class="p-1 transition-all text-indigo-300/40 hover:text-indigo-200">
+                        <i class="fa-solid fa-pen text-sm"></i>
+                    </button>
                     <button onclick="toggleStar('${task.id}')" class="p-1 transition-all ${task.starred ? 'text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.8)] scale-110' : 'text-indigo-300/30 hover:text-yellow-400/70 hover:scale-110'}">
                         <i class="fa-solid fa-star text-lg"></i>
                     </button>
@@ -597,6 +600,22 @@
                 ` : ''}
             `;
             return el;
+        }
+
+        // New function to handle task editing
+        function editTask(taskId, event) {
+            if (event) event.stopPropagation();
+            let list = getActiveList();
+            let task = list.items.find(t => t.id === taskId);
+            
+            let newText = prompt("Edit your task:", task.text);
+            
+            if (newText !== null && newText.trim() !== "") {
+                task.text = newText.trim();
+                renderInnerTasks(list);
+                markDataChanged();
+                autoSaveToLocalStorage();
+            }
         }
 
         function toggleStar(taskId) {
@@ -859,6 +878,32 @@
                     searchInput.blur(); 
                 }
             });
+        }
+
+        // ==========================================
+        // MOBILE SWIPE-TO-GO-BACK LOGIC
+        // ==========================================
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        document.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+
+        document.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        }, { passive: true });
+
+        function handleSwipe() {
+            // Check if it's a swipe from the left edge (within 50px) to the right (at least 75px distance)
+            if (touchStartX < 50 && (touchEndX - touchStartX > 75)) {
+                if (appState.currentLevel === 'list') {
+                    navigate(appState.activeGroupId ? 'group' : 'home');
+                } else if (appState.currentLevel === 'group') {
+                    navigate('home');
+                }
+            }
         }
 
         // Boot
