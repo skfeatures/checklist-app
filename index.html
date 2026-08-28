@@ -233,6 +233,13 @@
                     appState.isLoggedIn = true;
                     isCloudSynced = false;
                     document.getElementById('auth-text').innerText = "Log off";
+                    
+                    // Reset local data before syncing to prevent email crossover
+                    appState.data = [];
+                    localDataVersion = 0;
+                    lastSyncedVersion = 0;
+                    render(); // Clear screen momentarily while fetching
+                    
                     syncDataFromGoogle(user);
                 } else {
                     currentUser = null;
@@ -242,6 +249,16 @@
                         unsubscribeSnapshot();
                         unsubscribeSnapshot = null;
                     }
+                    
+                    // Clear all local data and reset the screen on logout
+                    appState.data = []; 
+                    appState.currentLevel = 'home';
+                    appState.activeGroupId = null;
+                    appState.activeListId = null;
+                    localDataVersion = 0;
+                    lastSyncedVersion = 0;
+                    localStorage.removeItem('checklist_backup'); 
+                    
                     render();
                 }
             });
