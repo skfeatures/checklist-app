@@ -79,9 +79,17 @@
         <main id="main-content" class="flex-grow overflow-y-auto p-4 pb-28 relative"></main>
 
         <div id="outer-fab-container" class="absolute bottom-6 w-full px-6 flex justify-between pointer-events-none z-10">
+            <!-- Group FAB (Left on Home) -->
             <button id="btn-new-group" onclick="openModal('group')" class="pointer-events-auto bg-indigo-900/40 backdrop-blur-lg border border-purple-400/40 text-white w-14 h-14 rounded-2xl shadow-[0_0_20px_rgba(168,85,247,0.3)] flex items-center justify-center text-xl transition transform active:scale-95 hover:shadow-[0_0_30px_rgba(168,85,247,0.6)]">
                 <i class="fa-solid fa-layer-group"></i>
             </button>
+            
+            <!-- Task FAB (Left inside Groups) -->
+            <button id="btn-group-new-task" onclick="openContinuousInput()" class="hidden pointer-events-auto bg-indigo-900/50 backdrop-blur-lg border border-indigo-400/50 text-white w-14 h-14 rounded-2xl shadow-[0_0_20px_rgba(99,102,241,0.4)] flex items-center justify-center text-2xl transition transform active:scale-95 hover:shadow-[0_0_30px_rgba(99,102,241,0.6)]">
+                <i class="fa-solid fa-check"></i>
+            </button>
+
+            <!-- List FAB (Right on Home and Groups) -->
             <button id="btn-new-list" onclick="openModal('list')" class="pointer-events-auto bg-purple-900/40 backdrop-blur-lg border border-pink-400/40 text-white w-14 h-14 rounded-full shadow-[0_0_20px_rgba(236,72,153,0.3)] flex items-center justify-center text-2xl transition transform active:scale-95 hover:shadow-[0_0_30px_rgba(236,72,153,0.6)]">
                 <i class="fa-solid fa-plus"></i>
             </button>
@@ -166,6 +174,7 @@
         let unsubscribeShared = null;
         let currentUser = null;
         let syncTimeout = null;
+        let sortableInstance = null;
 
         if(firebaseConfig.apiKey !== "YOUR_API_KEY") {
             firebase.initializeApp(firebaseConfig);
@@ -283,26 +292,56 @@
         const innerFab = document.getElementById('inner-fab-container');
         const contInputBar = document.getElementById('continuous-input-bar');
         const btnNewGroup = document.getElementById('btn-new-group');
+        const btnGroupNewTask = document.getElementById('btn-group-new-task');
 
         function render() {
             mainContent.innerHTML = '';
             if (appState.currentLevel === 'home') {
                 backBtn.classList.add('hidden');
-                outerFabs.classList.remove('hidden'); innerFab.classList.add('hidden'); contInputBar.classList.add('hidden'); btnNewGroup.classList.remove('hidden');
-                let sortedData = [...appState.data].sort((a, b) => a.createdAt - b.createdAt);
+                outerFabs.classList.remove('hidden'); 
+                innerFab.classList.add('hidden'); 
+                contInputBar.classList.add('hidden'); 
+                
+                btnNewGroup.classList.remove('hidden');
+                btnGroupNewTask.classList.add('hidden');
+
+                let sortedData = [...appState.data]; // Preserves custom drag-and-drop sorting
                 renderOuterItems(sortedData, mainContent);
             } 
             else if (appState.currentLevel === 'group') {
                 backBtn.classList.remove('hidden'); backBtn.onclick = () => { history.back(); };
-                outerFabs.classList.remove('hidden'); innerFab.classList.add('hidden'); contInputBar.classList.add('hidden'); btnNewGroup.classList.add('hidden'); 
+                outerFabs.classList.remove('hidden'); 
+                innerFab.classList.add('hidden'); 
+                contInputBar.classList.add('hidden'); 
+                
+                btnNewGroup.classList.add('hidden'); 
+                btnGroupNewTask.classList.remove('hidden'); // Show Task FAB instead of Group FAB
+
                 let group = appState.data.find(g => g.id === appState.activeGroupId);
-                if(group) renderOuterItems([...group.items].sort((a, b) => a.createdAt - b.createdAt), mainContent);
+                if(group) {
+                    // 1. Render Sub-Lists
+                    let lists = group.items.filter(i => i.text === undefined); 
+                    if (lists.length > 0) renderOuterItems(lists, mainContent);
+
+                    // 2. Render Tasks
+                    let tasks = group.items.filter(i => i.text !== undefined);
+                    if (tasks.length > 0 || isSelectionMode) {
+                        if (lists.length > 0) {
+                            const spacer = document.createElement('div');
+                            spacer.className = "w-full h-px bg-indigo-500/30 my-6 shadow-[0_0_10px_rgba(99,102,241,0.5)]";
+                            mainContent.appendChild(spacer);
+                        }
+                        renderTasksUI(group, mainContent);
+                    }
+                }
             } 
             else if (appState.currentLevel === 'list') {
                 backBtn.classList.remove('hidden'); backBtn.onclick = () => { history.back(); };
-                outerFabs.classList.add('hidden'); innerFab.classList.remove('hidden'); 
-                let list = getActiveList();
-                if(list) renderInnerTasks(list);
+                outerFabs.classList.add('hidden'); 
+                innerFab.classList.remove('hidden'); 
+                
+                let list = getActiveContainer();
+                if(list) renderTasksUI(list, mainContent);
             }
         }
 
@@ -316,11 +355,10 @@
         function renderOuterItems(items, container) {
             const wrapper = document.createElement('div');
             wrapper.id = "sortable-container";
-            wrapper.className = "space-y-3"; // Tighter spacing between boxes
+            wrapper.className = "space-y-3"; 
             
             items.forEach(item => {
                 const div = document.createElement('div');
-                // Slimmer padding (p-2.5) and slightly less rounded (rounded-xl)
                 div.className = "bg-[#161a3a]/50 backdrop-blur-md p-2.5 rounded-xl shadow-[0_0_10px_rgba(168,85,247,0.15)] border border-purple-500/30 flex items-center space-x-3 transition active:scale-95";
                 div.dataset.id = item.id;
                 
@@ -328,29 +366,22 @@
                 let sharedBadge = (item.sharedWith && item.sharedWith.length > 0) || !isOwnedByMe 
                     ? `<i class="fa-solid fa-users text-[10px] text-blue-300 ml-1"></i>` : '';
 
-                // Share button with compact padding and smaller icon
                 let shareButton = isOwnedByMe 
                     ? `<button onclick="shareItem('${item.id}', event)" class="p-1.5 text-blue-300/70 hover:text-blue-200 transition-colors" title="Share"><i class="fa-solid fa-user-plus text-sm"></i></button>` : '';
 
                 div.innerHTML = `
-                    <!-- Left Side Icon -->
                     <div class="shrink-0 w-11 h-11 rounded-lg ${item.color} flex items-center justify-center text-white text-lg shadow-[0_0_10px_rgba(255,255,255,0.15)] cursor-pointer" onclick="openItem('${item.id}', '${item.type}')">
                         <i class="fa-solid ${item.icon}"></i>
                     </div>
                     
-                    <!-- Right Side Content & Actions -->
                     <div class="flex flex-col flex-grow min-w-0 justify-center">
-                        
-                        <!-- Top Row: Full-width Title -->
                         <div class="w-full cursor-pointer pr-1" onclick="openItem('${item.id}', '${item.type}')">
                             <h3 class="font-bold text-white text-[16px] leading-tight truncate drop-shadow-md pb-0.5">${item.title} ${sharedBadge}</h3>
                         </div>
                         
-                        <!-- Bottom Row: Subtitle on Left, Actions tucked on Right -->
                         <div class="flex justify-between items-end w-full">
                             <p class="text-[10px] text-indigo-300 font-medium uppercase truncate cursor-pointer pb-0.5" onclick="openItem('${item.id}', '${item.type}')">${item.type}</p>
                             
-                            <!-- Action Buttons Container (Shifted down and right using negative margins) -->
                             <div class="flex items-center space-x-0.5 shrink-0 -mb-1.5 -mr-2">
                                 ${shareButton}
                                 <button onclick="openEditModal('${item.id}', event)" class="p-1.5 text-indigo-300/60 hover:text-white transition-colors">
@@ -370,22 +401,31 @@
             });
             container.appendChild(wrapper);
 
-            new Sortable(document.getElementById('sortable-container'), {
+            sortableInstance = new Sortable(document.getElementById('sortable-container'), {
                 handle: '.drag-handle', animation: 200, delay: 150, delayOnTouchOnly: true,
                 onEnd: function (evt) {
                     const orderIds = sortableInstance.toArray();
-                    if(appState.currentLevel === 'home') appState.data.sort((a,b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
-                    autoSaveToLocalStorage();
+                    
+                    if(appState.currentLevel === 'home') {
+                        appState.data.sort((a,b) => {
+                            let indexA = orderIds.indexOf(a.id); let indexB = orderIds.indexOf(b.id);
+                            return (indexA === -1 ? 9999 : indexA) - (indexB === -1 ? 9999 : indexB);
+                        });
+                    } else if(appState.currentLevel === 'group') {
+                        let group = appState.data.find(g => g.id === appState.activeGroupId);
+                        group.items.sort((a,b) => {
+                            let indexA = orderIds.indexOf(a.id); let indexB = orderIds.indexOf(b.id);
+                            return (indexA === -1 ? 9999 : indexA) - (indexB === -1 ? 9999 : indexB);
+                        });
+                    }
+                    autoSaveToLocalStorage(true);
                 }
             });
         }
 
         function shareItem(id, event) {
             event.stopPropagation();
-            if(!currentUser) {
-                alert("You must be logged in to share lists.");
-                return;
-            }
+            if(!currentUser) { alert("You must be logged in to share lists."); return; }
 
             let itemToShare = null;
             let parentGroup = null;
@@ -396,7 +436,6 @@
                 parentGroup = appState.data.find(g => g.id === appState.activeGroupId);
                 itemToShare = parentGroup ? parentGroup.items.find(i => i.id === id) : null;
             }
-
             if (!itemToShare) return;
 
             let currentShares = (itemToShare.sharedWith && itemToShare.sharedWith.length > 0) ? itemToShare.sharedWith.join(", ") : "None";
@@ -411,11 +450,8 @@
                     
                     if (parentGroup) {
                         if (!parentGroup.sharedWith) parentGroup.sharedWith = [];
-                        if (!parentGroup.sharedWith.includes(newEmail)) {
-                            parentGroup.sharedWith.push(newEmail);
-                        }
+                        if (!parentGroup.sharedWith.includes(newEmail)) parentGroup.sharedWith.push(newEmail);
                     }
-
                     autoSaveToLocalStorage(true);
                     alert(`Shared successfully with ${newEmail}!`);
                     render();
@@ -437,27 +473,32 @@
             if(currentUser && appState.currentLevel === 'home') {
                 db.collection('checklists').doc(id).delete().catch(console.warn);
             }
-            
-            autoSaveToLocalStorage(true);
-            render();
+            autoSaveToLocalStorage(true); render();
         }
 
-        function getActiveList() {
-            if (appState.activeGroupId) {
-                let group = appState.data.find(g => g.id === appState.activeGroupId);
-                return group ? group.items.find(l => l.id === appState.activeListId) : null;
+        // Returns whatever container (Group or List) the user is currently looking at
+        function getActiveContainer() {
+            if (appState.currentLevel === 'group') {
+                return appState.data.find(g => g.id === appState.activeGroupId);
+            } else if (appState.currentLevel === 'list') {
+                if (appState.activeGroupId) {
+                    let group = appState.data.find(g => g.id === appState.activeGroupId);
+                    return group ? group.items.find(l => l.id === appState.activeListId) : null;
+                }
+                return appState.data.find(l => l.id === appState.activeListId);
             }
-            return appState.data.find(l => l.id === appState.activeListId);
+            return null;
         }
 
         let isSelectionMode = false;
         let selectedTaskIds = new Set();
         const taskInput = document.getElementById('task-input');
 
-        function renderInnerTasks(list) {
-            mainContent.innerHTML = '';
-            let unchecked = list.items.filter(i => !i.completed);
-            let checked = list.items.filter(i => i.completed);
+        // Renamed and adjusted to append directly to the current view
+        function renderTasksUI(containerObj, domContainer) {
+            let tasks = containerObj.items.filter(i => i.text !== undefined);
+            let unchecked = tasks.filter(i => !i.completed);
+            let checked = tasks.filter(i => i.completed);
 
             unchecked.sort((a, b) => {
                 if (a.starred && !b.starred) return -1;
@@ -474,22 +515,22 @@
                 </button>
                 <div class="space-x-2">
                     ${isSelectionMode ? `<button onclick="deleteSelectedTasks()" class="text-xs font-bold bg-red-900/40 text-red-200 px-3 py-2 rounded-lg border border-red-500/30 hover:bg-red-800/50 transition">Delete Selected</button>` : ''}
-                    <button onclick="clearAllTasks()" class="text-xs font-bold bg-red-900/40 text-red-200 px-3 py-2 rounded-lg border border-red-500/30 hover:bg-red-800/50 transition">Clear All</button>
+                    <button onclick="clearAllTasks()" class="text-xs font-bold bg-red-900/40 text-red-200 px-3 py-2 rounded-lg border border-red-500/30 hover:bg-red-800/50 transition">Clear Tasks</button>
                 </div>
             `;
-            mainContent.appendChild(actionBar);
+            domContainer.appendChild(actionBar);
 
             const uncheckedDiv = document.createElement('div');
             uncheckedDiv.className = "space-y-3 mb-8";
             unchecked.forEach(task => uncheckedDiv.appendChild(createTaskElement(task)));
-            mainContent.appendChild(uncheckedDiv);
+            domContainer.appendChild(uncheckedDiv);
 
             if (checked.length > 0) {
                 const title = document.createElement('h3'); title.className = "text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-3 px-2"; title.innerText = "Completed";
-                mainContent.appendChild(title);
+                domContainer.appendChild(title);
                 const checkedDiv = document.createElement('div'); checkedDiv.className = "space-y-3 opacity-60";
                 checked.forEach(task => checkedDiv.appendChild(createTaskElement(task)));
-                mainContent.appendChild(checkedDiv);
+                domContainer.appendChild(checkedDiv);
             }
         }
 
@@ -517,38 +558,67 @@
 
         function editTask(taskId, event) {
             if (event) event.stopPropagation();
-            let list = getActiveList(); let task = list.items.find(t => t.id === taskId);
+            let container = getActiveContainer(); let task = container.items.find(t => t.id === taskId);
             let newText = prompt("Edit your task:", task.text);
-            if (newText !== null && newText.trim() !== "") { task.text = newText.trim(); renderInnerTasks(list); autoSaveToLocalStorage(true); }
+            if (newText !== null && newText.trim() !== "") { task.text = newText.trim(); render(); autoSaveToLocalStorage(true); }
         }
         function toggleStar(taskId) {
-            let list = getActiveList(); let task = list.items.find(t => t.id === taskId); task.starred = !task.starred;
-            renderInnerTasks(list); autoSaveToLocalStorage(true);
+            let container = getActiveContainer(); let task = container.items.find(t => t.id === taskId); task.starred = !task.starred;
+            render(); autoSaveToLocalStorage(true);
         }
         function toggleSelectionMode() { isSelectionMode = !isSelectionMode; selectedTaskIds.clear(); render(); }
         function toggleTaskSelection(taskId) { selectedTaskIds.has(taskId) ? selectedTaskIds.delete(taskId) : selectedTaskIds.add(taskId); render(); }
+        
         function deleteSelectedTasks() {
             if (selectedTaskIds.size === 0) return; if(!confirm(`Delete ${selectedTaskIds.size} selected task(s)?`)) return;
-            let list = getActiveList(); list.items = list.items.filter(t => !selectedTaskIds.has(t.id));
+            let container = getActiveContainer(); container.items = container.items.filter(t => !selectedTaskIds.has(t.id));
             selectedTaskIds.clear(); isSelectionMode = false; autoSaveToLocalStorage(true); render();
         }
+        
         function clearAllTasks() {
-            if(!confirm("Are you sure you want to delete ALL tasks in this list?")) return;
-            let list = getActiveList(); list.items = []; selectedTaskIds.clear(); isSelectionMode = false; autoSaveToLocalStorage(true); render();
+            if(!confirm("Are you sure you want to delete ALL tasks in this section? (Lists will be kept)")) return;
+            let container = getActiveContainer(); 
+            container.items = container.items.filter(i => i.text === undefined); // Filters out tasks, keeps lists
+            selectedTaskIds.clear(); isSelectionMode = false; autoSaveToLocalStorage(true); render();
         }
-        function openContinuousInput() { innerFab.classList.add('hidden'); contInputBar.classList.remove('hidden'); taskInput.focus(); }
-        function closeContinuousInput() { contInputBar.classList.add('hidden'); if(appState.currentLevel === 'list') innerFab.classList.remove('hidden'); taskInput.value = ''; taskInput.blur(); }
+
+        function openContinuousInput() { 
+            outerFabs.classList.add('hidden');
+            innerFab.classList.add('hidden'); 
+            contInputBar.classList.remove('hidden'); 
+            taskInput.focus(); 
+        }
+
+        function closeContinuousInput() { 
+            contInputBar.classList.add('hidden'); 
+            if(appState.currentLevel === 'list') innerFab.classList.remove('hidden'); 
+            if(appState.currentLevel === 'group' || appState.currentLevel === 'home') outerFabs.classList.remove('hidden'); 
+            taskInput.value = ''; taskInput.blur(); 
+        }
+
         function submitTask() {
             const text = taskInput.value.trim(); if (!text) return;
-            let list = getActiveList(); list.items.push({ id: Date.now().toString(), text: text, completed: false, starred: false, createdAt: Date.now() });
-            taskInput.value = ''; renderInnerTasks(list); autoSaveToLocalStorage(true); setTimeout(() => taskInput.focus(), 10);
+            let container = getActiveContainer(); 
+            if (container) {
+                container.items.push({ id: Date.now().toString(), text: text, completed: false, starred: false, createdAt: Date.now() });
+                taskInput.value = ''; 
+                render(); 
+                autoSaveToLocalStorage(true); 
+                
+                // Keep input open and auto-scroll to the bottom so you can see what you just added
+                setTimeout(() => {
+                    taskInput.focus();
+                    mainContent.scrollTop = mainContent.scrollHeight; 
+                }, 50);
+            }
         }
+
         function toggleTask(taskId) {
-            let list = getActiveList(); let task = list.items.find(t => t.id === taskId); const taskEl = document.getElementById(`task-${taskId}`);
+            let container = getActiveContainer(); let task = container.items.find(t => t.id === taskId); const taskEl = document.getElementById(`task-${taskId}`);
             if (!task.completed) {
                 taskEl.classList.add('fade-down');
-                setTimeout(() => { task.completed = true; renderInnerTasks(list); autoSaveToLocalStorage(true); }, 400);
-            } else { task.completed = false; renderInnerTasks(list); autoSaveToLocalStorage(true); }
+                setTimeout(() => { task.completed = true; render(); autoSaveToLocalStorage(true); }, 400);
+            } else { task.completed = false; render(); autoSaveToLocalStorage(true); }
         }
 
         // Modals (Create/Edit)
