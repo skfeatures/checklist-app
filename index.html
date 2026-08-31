@@ -316,41 +316,53 @@
         function renderOuterItems(items, container) {
             const wrapper = document.createElement('div');
             wrapper.id = "sortable-container";
-            wrapper.className = "space-y-4";
+            wrapper.className = "space-y-3"; // Tighter spacing between boxes
             
             items.forEach(item => {
                 const div = document.createElement('div');
-                div.className = "bg-[#161a3a]/50 backdrop-blur-md p-3 rounded-2xl shadow-[0_0_15px_rgba(168,85,247,0.15)] border border-purple-500/30 flex items-center justify-between transition active:scale-95";
+                // Slimmer padding (p-2.5) and slightly less rounded (rounded-xl)
+                div.className = "bg-[#161a3a]/50 backdrop-blur-md p-2.5 rounded-xl shadow-[0_0_10px_rgba(168,85,247,0.15)] border border-purple-500/30 flex items-center space-x-3 transition active:scale-95";
                 div.dataset.id = item.id;
                 
-                // Allow sharing on ANY level if you own it
                 let isOwnedByMe = currentUser && (item.ownerUid === currentUser.uid);
                 let sharedBadge = (item.sharedWith && item.sharedWith.length > 0) || !isOwnedByMe 
-                    ? `<i class="fa-solid fa-users text-[10px] text-blue-300 ml-2"></i>` : '';
+                    ? `<i class="fa-solid fa-users text-[10px] text-blue-300 ml-1"></i>` : '';
 
+                // Share button with compact padding and smaller icon
                 let shareButton = isOwnedByMe 
-                    ? `<button onclick="shareItem('${item.id}', event)" class="p-2 sm:p-2.5 text-blue-300/70 hover:text-blue-200 transition-colors" title="Share"><i class="fa-solid fa-user-plus"></i></button>` : '';
+                    ? `<button onclick="shareItem('${item.id}', event)" class="p-1.5 text-blue-300/70 hover:text-blue-200 transition-colors" title="Share"><i class="fa-solid fa-user-plus text-sm"></i></button>` : '';
 
                 div.innerHTML = `
-                    <div class="flex items-center space-x-4 flex-grow cursor-pointer min-w-0 pr-2" onclick="openItem('${item.id}', '${item.type}')">
-                        <div class="shrink-0 w-12 h-12 rounded-xl ${item.color} flex items-center justify-center text-white text-xl shadow-[0_0_15px_rgba(255,255,255,0.2)]">
-                            <i class="fa-solid ${item.icon}"></i>
-                        </div>
-                        <div class="min-w-0 flex-grow">
-                            <h3 class="font-bold text-white text-lg leading-tight truncate drop-shadow-md">${item.title} ${sharedBadge}</h3>
-                            <p class="text-xs text-indigo-300 font-medium uppercase mt-0.5 truncate">${item.type}</p>
-                        </div>
+                    <!-- Left Side Icon -->
+                    <div class="shrink-0 w-11 h-11 rounded-lg ${item.color} flex items-center justify-center text-white text-lg shadow-[0_0_10px_rgba(255,255,255,0.15)] cursor-pointer" onclick="openItem('${item.id}', '${item.type}')">
+                        <i class="fa-solid ${item.icon}"></i>
                     </div>
-                    <div class="flex items-center space-x-1 shrink-0">
-                        ${shareButton}
-                        <button onclick="openEditModal('${item.id}', event)" class="p-2 sm:p-2.5 text-indigo-300/60 hover:text-white transition-colors">
-                            <i class="fa-solid fa-pen"></i>
-                        </button>
-                        <button onclick="deleteItem('${item.id}', event)" class="p-2 sm:p-2.5 text-red-400/60 hover:text-red-400 transition-colors">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
-                        <div class="drag-handle p-2 sm:p-2.5 text-indigo-300/60 hover:text-white transition-colors">
-                            <i class="fa-solid fa-grip-lines text-2xl"></i>
+                    
+                    <!-- Right Side Content & Actions -->
+                    <div class="flex flex-col flex-grow min-w-0 justify-center">
+                        
+                        <!-- Top Row: Full-width Title -->
+                        <div class="w-full cursor-pointer pr-1" onclick="openItem('${item.id}', '${item.type}')">
+                            <h3 class="font-bold text-white text-[16px] leading-tight truncate drop-shadow-md pb-0.5">${item.title} ${sharedBadge}</h3>
+                        </div>
+                        
+                        <!-- Bottom Row: Subtitle on Left, Actions tucked on Right -->
+                        <div class="flex justify-between items-end w-full">
+                            <p class="text-[10px] text-indigo-300 font-medium uppercase truncate cursor-pointer pb-0.5" onclick="openItem('${item.id}', '${item.type}')">${item.type}</p>
+                            
+                            <!-- Action Buttons Container (Shifted down and right using negative margins) -->
+                            <div class="flex items-center space-x-0.5 shrink-0 -mb-1.5 -mr-2">
+                                ${shareButton}
+                                <button onclick="openEditModal('${item.id}', event)" class="p-1.5 text-indigo-300/60 hover:text-white transition-colors">
+                                    <i class="fa-solid fa-pen text-sm"></i>
+                                </button>
+                                <button onclick="deleteItem('${item.id}', event)" class="p-1.5 text-red-400/60 hover:text-red-400 transition-colors">
+                                    <i class="fa-solid fa-trash text-sm"></i>
+                                </button>
+                                <div class="drag-handle p-1.5 text-indigo-300/60 hover:text-white transition-colors cursor-grab">
+                                    <i class="fa-solid fa-grip-lines text-lg"></i>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -368,7 +380,6 @@
             });
         }
 
-        // Sharing Function updated for Nested Groups/Lists
         function shareItem(id, event) {
             event.stopPropagation();
             if(!currentUser) {
@@ -398,7 +409,6 @@
                 if (!itemToShare.sharedWith.includes(newEmail)) {
                     itemToShare.sharedWith.push(newEmail);
                     
-                    // Add to parent group as well so Firebase query finds it
                     if (parentGroup) {
                         if (!parentGroup.sharedWith) parentGroup.sharedWith = [];
                         if (!parentGroup.sharedWith.includes(newEmail)) {
@@ -440,7 +450,6 @@
             return appState.data.find(l => l.id === appState.activeListId);
         }
 
-        // Inner Tasks Logic
         let isSelectionMode = false;
         let selectedTaskIds = new Set();
         const taskInput = document.getElementById('task-input');
