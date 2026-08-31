@@ -199,7 +199,10 @@
                     
                     appState.data = []; 
                     localStorage.removeItem('checklist_backup_v2'); 
-                    window.location.hash = ''; // Wipes URL and triggers routing home
+                    
+                    // Reset to root hash on logout
+                    window.history.replaceState(null, null, '#home');
+                    handleHashChange();
                 }
             });
         }
@@ -266,14 +269,14 @@
         }
 
         // ==========================================
-        // NEW HASH-BASED ROUTER
+        // STRICT HASH ROUTER
         // ==========================================
         function handleHashChange() {
             closeContinuousInput();
             isSelectionMode = false; 
             selectedTaskIds.clear();
             
-            const hash = window.location.hash.substring(1); // removes the '#'
+            const hash = window.location.hash.substring(1); 
             
             if (hash.startsWith('group=')) {
                 appState.currentLevel = 'group';
@@ -283,7 +286,7 @@
                 appState.currentLevel = 'list';
                 appState.activeListId = hash.split('=')[1];
                 
-                // Automatically find if this list belongs inside a group
+                // Auto-detect if this list belongs to a group
                 appState.activeGroupId = null;
                 for (let item of appState.data) {
                     if (item.type === 'group' && item.items) {
@@ -294,7 +297,6 @@
                     }
                 }
             } else {
-                // Default to home if no hash or invalid hash
                 appState.currentLevel = 'home';
                 appState.activeGroupId = null;
                 appState.activeListId = null;
@@ -302,9 +304,8 @@
             render();
         }
 
-        // Listen for Native Back/Forward URL changes
+        // Listen purely to URL Hash changes so Android's native back button works
         window.addEventListener('hashchange', handleHashChange);
-
 
         const mainContent = document.getElementById('main-content');
         const backBtn = document.getElementById('back-btn');
@@ -329,8 +330,9 @@
                 renderOuterItems(sortedData, mainContent);
             } 
             else if (appState.currentLevel === 'group') {
-                // Simply let the browser handle the back history
-                backBtn.classList.remove('hidden'); backBtn.onclick = () => { history.back(); };
+                backBtn.classList.remove('hidden'); 
+                backBtn.onclick = () => { window.history.back(); }; // triggers hashchange naturally
+                
                 outerFabs.classList.remove('hidden'); 
                 innerFab.classList.add('hidden'); 
                 contInputBar.classList.add('hidden'); 
@@ -355,8 +357,9 @@
                 }
             } 
             else if (appState.currentLevel === 'list') {
-                // Simply let the browser handle the back history
-                backBtn.classList.remove('hidden'); backBtn.onclick = () => { history.back(); };
+                backBtn.classList.remove('hidden'); 
+                backBtn.onclick = () => { window.history.back(); }; // triggers hashchange naturally
+                
                 outerFabs.classList.add('hidden'); 
                 innerFab.classList.remove('hidden'); 
                 
@@ -366,7 +369,7 @@
         }
 
         function openItem(id, type) {
-            // Physically changes the URL Hash, triggering the router naturally
+            // Strictly physical URL change to populate the Android Back Stack
             window.location.hash = type + '=' + id;
         }
 
@@ -682,9 +685,10 @@
         taskInput.addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); submitTask(); } });
         document.getElementById('new-item-name').addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); confirmCreate(); } });
         
-        // Initial boot to set Hash State
-        if(!window.location.hash) {
-            window.location.hash = ''; // defaults to home via handleHashChange
+        // Initial Boot
+        if (!window.location.hash || window.location.hash === '#') {
+            window.history.replaceState(null, null, '#home');
+            handleHashChange();
         } else {
             handleHashChange();
         }
