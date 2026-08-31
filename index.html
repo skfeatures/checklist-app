@@ -187,7 +187,6 @@
                     document.getElementById('auth-text').innerText = "Log off";
                     
                     appState.data = []; 
-                    handleHashChange(); 
                     syncDataFromGoogle(user);
                 } else {
                     currentUser = null;
@@ -198,11 +197,14 @@
                     if(unsubscribeShared) { unsubscribeShared(); unsubscribeShared = null; }
                     
                     appState.data = []; 
+                    appState.currentLevel = 'home';
+                    appState.activeGroupId = null;
+                    appState.activeListId = null;
                     localStorage.removeItem('checklist_backup_v2'); 
                     
-                    // Reset to root hash on logout
-                    window.history.replaceState(null, null, '#home');
-                    handleHashChange();
+                    // Reset to root state on logout
+                    window.history.replaceState({ level: 'home', groupId: null, listId: null }, "", window.location.pathname + "?view=home");
+                    render();
                 }
             });
         }
@@ -269,43 +271,25 @@
         }
 
         // ==========================================
-        // STRICT HASH ROUTER
+        // STRICT HISTORY PUSH FOR ANDROID TWA
         // ==========================================
-        function handleHashChange() {
+        
+        // This registers the initial root page in Android's history stack so it has a baseline.
+        window.history.replaceState({ level: 'home', groupId: null, listId: null }, "", window.location.pathname + "?view=home");
+        
+        // When the user edge-swipes, Android fires 'popstate'. We use this to naturally step back.
+        window.addEventListener('popstate', (event) => {
             closeContinuousInput();
-            isSelectionMode = false; 
-            selectedTaskIds.clear();
-            
-            const hash = window.location.hash.substring(1); 
-            
-            if (hash.startsWith('group=')) {
-                appState.currentLevel = 'group';
-                appState.activeGroupId = hash.split('=')[1];
-                appState.activeListId = null;
-            } else if (hash.startsWith('list=')) {
-                appState.currentLevel = 'list';
-                appState.activeListId = hash.split('=')[1];
-                
-                // Auto-detect if this list belongs to a group
-                appState.activeGroupId = null;
-                for (let item of appState.data) {
-                    if (item.type === 'group' && item.items) {
-                        if (item.items.find(i => i.id === appState.activeListId)) {
-                            appState.activeGroupId = item.id;
-                            break;
-                        }
-                    }
-                }
+            isSelectionMode = false; selectedTaskIds.clear();
+            if (event.state) {
+                appState.currentLevel = event.state.level;
+                appState.activeGroupId = event.state.groupId;
+                appState.activeListId = event.state.listId;
             } else {
-                appState.currentLevel = 'home';
-                appState.activeGroupId = null;
-                appState.activeListId = null;
+                appState.currentLevel = 'home'; appState.activeGroupId = null; appState.activeListId = null;
             }
             render();
-        }
-
-        // Listen purely to URL Hash changes so Android's native back button works
-        window.addEventListener('hashchange', handleHashChange);
+        });
 
         const mainContent = document.getElementById('main-content');
         const backBtn = document.getElementById('back-btn');
@@ -331,7 +315,7 @@
             } 
             else if (appState.currentLevel === 'group') {
                 backBtn.classList.remove('hidden'); 
-                backBtn.onclick = () => { window.history.back(); }; // triggers hashchange naturally
+                backBtn.onclick = () => { window.history.back(); }; // triggers popstate naturally
                 
                 outerFabs.classList.remove('hidden'); 
                 innerFab.classList.add('hidden'); 
@@ -358,7 +342,7 @@
             } 
             else if (appState.currentLevel === 'list') {
                 backBtn.classList.remove('hidden'); 
-                backBtn.onclick = () => { window.history.back(); }; // triggers hashchange naturally
+                backBtn.onclick = () => { window.history.back(); }; // triggers popstate naturally
                 
                 outerFabs.classList.add('hidden'); 
                 innerFab.classList.remove('hidden'); 
@@ -369,8 +353,17 @@
         }
 
         function openItem(id, type) {
-            // Strictly physical URL change to populate the Android Back Stack
-            window.location.hash = type + '=' + id;
+            if (type === 'group') { appState.activeGroupId = id; appState.currentLevel = 'group'; } 
+            else { appState.activeListId = id; appState.currentLevel = 'list'; }
+            
+            // This is the MAGIC line: Changing the query parameter forces Android WebView to register a real page jump!
+            window.history.pushState(
+                { level: appState.currentLevel, groupId: appState.activeGroupId, listId: appState.activeListId }, 
+                "", 
+                window.location.pathname + "?view=" + appState.currentLevel + "&id=" + id
+            );
+            
+            render();
         }
 
         function renderOuterItems(items, container) {
@@ -685,13 +678,7 @@
         taskInput.addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); submitTask(); } });
         document.getElementById('new-item-name').addEventListener('keypress', e => { if (e.key === 'Enter') { e.preventDefault(); confirmCreate(); } });
         
-        // Initial Boot
-        if (!window.location.hash || window.location.hash === '#') {
-            window.history.replaceState(null, null, '#home');
-            handleHashChange();
-        } else {
-            handleHashChange();
-        }
+        render();
     </script>
 </body>
 </html>
